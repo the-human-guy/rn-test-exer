@@ -11,7 +11,7 @@ docs/     task PDF, plan + decisions, release note, self-review, test results
 ## Requirements
 
 - Node.js 20+ (tested with 22), npm.
-- iOS: macOS with Xcode and an iOS Simulator. Android: Android Studio SDK and an emulator, `adb` on PATH.
+- iOS: macOS with Xcode 27.2 (tested; builds for the iOS 26.2 simulator) and an iOS Simulator. Xcode 26.2 (Swift 6.2.3) fails to compile Expo SDK 58's `expo-modules-jsi` ("sending 'slot' risks causing data races"). Android: Android Studio SDK and an emulator, `adb` on PATH.
 - No accounts, keys or internet access are needed at runtime.
 
 ## Clean checkout → run
@@ -43,7 +43,11 @@ The default server address is `http://127.0.0.1:8787`. The iOS Simulator reaches
 ### Putting the fixtures on the device
 
 - Android: `adb push kit/fixtures/. /sdcard/Download/`, then pick them from Downloads.
-- iOS Simulator: drag the files from `kit/fixtures/` onto the Simulator window and save them into Files ("On My iPhone").
+- iOS Simulator (booted): copy them into the Files app's local storage, then pick them from Files → "On My iPhone":
+  ```bash
+  G=$(xcrun simctl get_app_container booted com.apple.DocumentsApp groups | awk '/LocalStorage/{print $2}')
+  mkdir -p "$G/File Provider Storage" && cp kit/fixtures/* "$G/File Provider Storage/"
+  ```
 
 ## Tests
 
@@ -66,6 +70,8 @@ Latest output: `docs/test-results.txt`. The kit's own tests: `cd kit && npm test
 | `spoofed.pdf` + `oversize.csv` rejected before the POST (`createRequests` unchanged) | `spoofed.pdf and oversize.csv …` |
 | Late response doesn't resurrect a deleted job | `late response …` |
 | No file name / bytes / descriptions in logs | `logs never contain …` |
+| Double tap on Upload → one POST, one job | `double-tap on Upload …` |
+| Unknown outcome: no new import; discard re-checks by key | `unknown outcome: …` (×2) |
 
 ## Manual acceptance run (for the video)
 
@@ -81,10 +87,13 @@ Use **Diagnostics** (top right, test-only) to switch scenarios and watch the moc
 
 | Platform | Device / OS | Picker | Full import | Scenarios | Result |
 |---|---|---|---|---|---|
-| iOS | _TBD (Simulator, iOS version)_ | _not yet verified_ | _not yet verified_ | _not yet verified_ | **UNVERIFIED** |
-| Android | _TBD (Emulator, API level)_ | _not yet verified_ | _not yet verified_ | _not yet verified_ | **UNVERIFIED** |
+| iOS | iPhone 17 Simulator, iOS 26.2 (Xcode 27.2) | Files, "On My iPhone" | CSV, upload, report, details, check status, delete | happy, lost_ack + relaunch, stale_status, delete_failure, spoofed/oversize | **PASS** (see note) |
+| Android | Medium Phone emulator, Android 16 / API 36 | Downloads | CSV, upload, report, details, check status, delete | happy, lost_ack + relaunch, stale_status, delete_failure, spoofed/oversize | **PASS** |
 
-Verified so far, in a Linux container: unit and integration tests (22/22) against the real mock, TypeScript typecheck, Metro bundles for iOS and Android, and `expo prebuild` config (permissions, ATS, cleartext). No native run has been done yet. A platform stays **UNVERIFIED** until it has actually been run.
+Both platforms were run by hand from the steps above, on a debug dev build on macOS, and recorded on video. Unit and integration tests are 29/29 against the real mock.
+
+- Android counters at the end of the run: `createRequests 2, newJobs 2, duplicateHits 0, acceptedBytes 224, deleteRequests 3`. These are the expected numbers.
+- iOS note: the counters showed `duplicateHits 2`. Every duplicate request reused an existing key, the server returned the existing job, and `acceptedBytes` matched `newJobs` (no job and no data were created twice). The app has no automatic resend. The likely cause is iOS (URLSession) retrying the POST itself after the mock drops the connection in `lost_ack`. This has not been confirmed (see `docs/self-review.md`).
 
 ## Docs
 

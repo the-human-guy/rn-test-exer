@@ -20,10 +20,14 @@ export type ValidationResult =
   | { ok: true; format: FileFormat; size: number }
   | { ok: false; reason: RejectReason };
 
+/**
+ * Same windows as the kit server: PDF = first 5 bytes are `%PDF-`; CSV = the first 24 bytes, with CR removed,
+ * start with the header. A CRLF header doesn't fit in 24 bytes, so the server rejects it and so do we.
+ */
 export function detectFormat(head: Uint8Array): FileFormat | null {
-  const ascii = String.fromCharCode(...head.subarray(0, 32));
-  if (ascii.startsWith('%PDF-')) return 'pdf';
-  if (ascii.replace(/\r/g, '').startsWith(CSV_HEADER)) return 'csv';
+  const ascii = (n: number) => String.fromCharCode(...head.subarray(0, n));
+  if (ascii(5) === '%PDF-') return 'pdf';
+  if (ascii(CSV_HEADER.length).replace(/\r/g, '').startsWith(CSV_HEADER)) return 'csv';
   return null;
 }
 

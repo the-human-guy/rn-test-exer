@@ -4,7 +4,7 @@
 
 
 Test Suites: 3 passed, 3 total
-Tests:       22 passed, 22 total
+Tests:       29 passed, 29 total
 Snapshots:   0 total
-Time:        10.204 s, estimated 13 s
+Time:        10.889 s
 Ran all test suites in 2 projects.

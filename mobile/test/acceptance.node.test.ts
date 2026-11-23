@@ -127,6 +127,46 @@ test('lost_ack: retry with the SAME key after by-key 404 does not create a secon
   c.controller.dispose();
 });
 
+test('double-tap on Upload sends once with one key (one job)', async () => {
+  const c = makeController(baseUrl);
+  await c.controller.prepare(picked('statement.csv'));
+  await Promise.all([c.controller.confirm(), c.controller.confirm()]);
+  await c.controller.idle();
+  const s = await stats(baseUrl);
+  expect(s.createRequests).toBe(1);
+  expect(s.newJobs).toBe(1);
+  c.controller.dispose();
+});
+
+test('unknown outcome: no new import is offered; discard re-checks by key and adopts a job that turned up', async () => {
+  await scenario(baseUrl, 'lost_ack');
+  const c = makeController(baseUrl);
+  const realGetByKey = c.api.getByKey;
+  let misses = 1;
+  c.api.getByKey = async k => (misses-- > 0 ? { kind: 'http', status: 404 } : realGetByKey(k));
+  await c.controller.prepare(picked('statement.csv'));
+  await c.controller.confirm();
+  expect(c.controller.snapshot.op!).toMatchObject({ send: 'unknown', sendError: 'not_found' });
+  expect(c.controller.canStartNew()).toBe(false);
+  await c.controller.discardUnknown();
+  expect(c.controller.snapshot.op!).toMatchObject({ send: 'acked', job: { jobId: 'job-demo-001' } });
+  expect((await stats(baseUrl)).newJobs).toBe(1);
+  c.controller.dispose();
+});
+
+test('unknown outcome: discard clears the record and the private copy only after a fresh by-key 404', async () => {
+  const c = makeController(baseUrl);
+  c.api.createImport = async () => ({ kind: 'network' });
+  await c.controller.prepare(picked('statement.csv'));
+  await c.controller.confirm();
+  expect(c.controller.snapshot.op!).toMatchObject({ send: 'unknown', sendError: 'not_found' });
+  expect(c.files.list()).toHaveLength(1);
+  await c.controller.discardUnknown();
+  expect(c.controller.snapshot.op).toBeNull();
+  expect(c.files.list()).toEqual([]);
+  c.controller.dispose();
+});
+
 test('stale_status: ready/rev3 then processing/rev2 does not roll the state back', async () => {
   const { controller } = await importFile('statement.csv');
   await waitFor(() => controller.snapshot.op!.job!.status === 'ready');
@@ -159,6 +199,7 @@ test('delete_failure: 503 is not deletion; after happy, retry with the same key 
   expect(op.job!.status).toBe('deleting'); // accepted, but NOT deleted yet
   await waitFor(() => controller.snapshot.op!.job!.status === 'deleted', 4000);
   expect(controller.snapshot.op!.job!.result).toBeUndefined();
+  expect(controller.snapshot.op!.file.name).toBeUndefined();
   expect((await stats(baseUrl)).deleteRequests).toBe(2);
   controller.dispose();
 });

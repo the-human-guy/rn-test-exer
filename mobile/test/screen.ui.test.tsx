@@ -43,6 +43,30 @@ test('stale processing/rev2 after ready/rev3 does not roll the UI back', async (
   c.dispose();
 });
 
+test('"Check status" shows when it last checked, even when the server has nothing newer', async () => {
+  const c = setup(readyOp, { getJob: jest.fn(async () => ok(READY)) });
+  await render(<ImportScreen controller={c} pick={async () => null} onDetails={() => {}} />);
+  await act(() => c.start());
+  expect(screen.queryByTestId('checked-at')).toBeNull();
+  await fireEvent.press(screen.getByTestId('refresh'));
+  await act(() => c.idle());
+  expect(screen.getByTestId('checked-at')).toHaveTextContent(/^Last checked at /);
+  expect(screen.getByText('Report ready')).toBeTruthy();
+  c.dispose();
+});
+
+test('"Check status" shows the error, not a check time, when the server is unreachable', async () => {
+  const getJob = jest.fn(async (): Promise<HttpResult<ServerJob>> => ({ kind: 'network' }));
+  const c = setup(readyOp, { getJob });
+  await render(<ImportScreen controller={c} pick={async () => null} onDetails={() => {}} />);
+  await act(() => c.start());
+  await fireEvent.press(screen.getByTestId('refresh'));
+  await act(() => c.idle());
+  expect(screen.queryByTestId('checked-at')).toBeNull();
+  expect(screen.getByText(/Can't reach the server/)).toBeTruthy();
+  c.dispose();
+});
+
 test('503 on delete never shows "deleted"; the data is reported as still on the server', async () => {
   const deleteJob = jest.fn(async (): Promise<HttpResult<ServerJob>> => ({ kind: 'http', status: 503 }));
   const c = setup(readyOp, { getJob: jest.fn(async () => ok(READY)), deleteJob });

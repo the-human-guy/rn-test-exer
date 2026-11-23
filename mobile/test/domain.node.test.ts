@@ -31,7 +31,9 @@ describe('validateFile', () => {
   test('accepts pdf and csv by content', async () => {
     expect(await validateFile(memProbe(enc('%PDF-1.7 ...')), { name: 'a.pdf' })).toMatchObject({ ok: true, format: 'pdf' });
     expect(await validateFile(memProbe(csv), { name: 'a.csv' })).toMatchObject({ ok: true, format: 'csv' });
-    expect(await validateFile(memProbe(enc('date,description,amount\r\n1,2,3')), { name: 'a.csv' })).toMatchObject({ ok: true });
+  });
+  test('CSV header check uses the same 24-byte window as the server (CRLF header is rejected)', async () => {
+    expect(await validateFile(memProbe(enc('date,description,amount\r\n1,2,3')), { name: 'a.csv' })).toEqual({ ok: false, reason: 'unrecognized_content' });
   });
   test('extension / MIME alone is not trusted', async () => {
     expect(await validateFile(memProbe(enc('This is plain text')), { name: 'x.pdf', mimeType: 'application/pdf' })).toEqual({ ok: false, reason: 'unrecognized_content' });
@@ -73,9 +75,13 @@ describe('applyServerJob', () => {
     const next = applyServerJob(base, { jobId: 'j1', status: 'deleting', revision: 4 });
     expect(next.job).toEqual({ jobId: 'j1', status: 'deleting', revision: 4 });
   });
-  test('deleted is terminal', () => {
+  test('deleted is terminal and drops the file name', () => {
     const del = applyServerJob(base, { jobId: 'j1', status: 'deleted', revision: 5 });
+    expect(del.file).toEqual({ size: 1, format: 'csv' });
     expect(applyServerJob(del, { jobId: 'j1', status: 'ready', revision: 6 })).toBe(del);
+  });
+  test('deleting keeps the file name until deletion is confirmed', () => {
+    expect(applyServerJob(base, { jobId: 'j1', status: 'deleting', revision: 4 }).file.name).toBe('n');
   });
 });
 

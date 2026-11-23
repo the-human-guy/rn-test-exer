@@ -40,7 +40,7 @@ export function ImportScreen({ controller: c, pick, onDetails }: Props) {
     return (
       <Card>
         <Title>Confirm upload</Title>
-        <Row label="Name" value={draft.file.name} />
+        <Row label="Name" value={draft.file.name ?? ''} />
         <Row label="Size" value={formatBytes(draft.file.size)} />
         <Row label="Format" value={draft.file.format.toUpperCase()} />
         <Body muted>The file will be sent to the server for analysis.</Body>
@@ -75,7 +75,7 @@ export function ImportScreen({ controller: c, pick, onDetails }: Props) {
 
   return (
     <View style={{ gap: 16 }}>
-      <OpView op={op} c={c} busy={busy} onDetails={onDetails} />
+      <OpView op={op} c={c} busy={busy} checkedAt={snap.checkedAt} onDetails={onDetails} />
       {c.canStartNew() ? (
         <>
           {chooser('Start a new import')}
@@ -88,7 +88,19 @@ export function ImportScreen({ controller: c, pick, onDetails }: Props) {
   );
 }
 
-function OpView({ op, c, busy, onDetails }: { op: ImportOp; c: ImportController; busy: string | null; onDetails: Props['onDetails'] }) {
+function OpView({
+  op,
+  c,
+  busy,
+  checkedAt,
+  onDetails,
+}: {
+  op: ImportOp;
+  c: ImportController;
+  busy: string | null;
+  checkedAt: number | null;
+  onDetails: Props['onDetails'];
+}) {
   if (op.send === 'pending' || op.send === 'sending') {
     return (
       <Card>
@@ -100,7 +112,7 @@ function OpView({ op, c, busy, onDetails }: { op: ImportOp; c: ImportController;
   }
 
   if (op.send === 'unknown') {
-    const missing = op.sendError === 'staged_copy_missing';
+    const missing = !c.hasStagedCopy();
     return (
       <Card tone="warn">
         <Title>Upload result unknown</Title>
@@ -108,7 +120,8 @@ function OpView({ op, c, busy, onDetails }: { op: ImportOp; c: ImportController;
           The server may have received the file. We check using the same upload key. Nothing is sent again unless you tap
           "Send again".
         </Body>
-        {op.sendError ? <Body muted>{errorText[op.sendError]}</Body> : null}
+        {op.sendError && op.sendError !== 'staged_copy_missing' ? <Body muted>{errorText[op.sendError]}</Body> : null}
+        {missing ? <Body muted>{errorText.staged_copy_missing}</Body> : null}
         <Button testID="check" label="Check again" onPress={() => c.checkByKey()} busy={busy === 'checking'} disabled={!!busy} />
         <Button
           testID="resend"
@@ -119,7 +132,7 @@ function OpView({ op, c, busy, onDetails }: { op: ImportOp; c: ImportController;
           busy={busy === 'sending'}
         />
         {op.sendError === 'not_found' ? (
-          <Button label="Discard this upload" kind="danger" onPress={() => c.clearLocal()} disabled={!!busy} />
+          <Button testID="discard" label="Discard this upload" kind="danger" onPress={() => c.discardUnknown()} disabled={!!busy} />
         ) : null}
       </Card>
     );
@@ -175,6 +188,7 @@ function OpView({ op, c, busy, onDetails }: { op: ImportOp; c: ImportController;
             <Row label="Total" value={`${formatMoney(monthlyTotal(job.result.items), job.result.currency)} / month`} />
           </View>
           <Button testID="refresh" label="Check status" kind="secondary" onPress={() => c.manualRefresh()} busy={busy === 'refreshing'} disabled={!!busy} />
+          {checkedAt ? <Body muted testID="checked-at">{`Last checked at ${new Date(checkedAt).toLocaleTimeString()}.`}</Body> : null}
         </Card>
       ) : null}
 

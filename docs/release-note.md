@@ -1,7 +1,7 @@
 # Release note: statement import fragment
 
 **Permissions actually needed**
-- Android: `INTERNET` only. The picker is the system document UI (SAF, `ACTION_OPEN_DOCUMENT`) and needs no storage permission. The template's `READ/WRITE_EXTERNAL_STORAGE`, `SYSTEM_ALERT_WINDOW` and `VIBRATE` are explicitly removed (`android.blockedPermissions`). Cleartext HTTP is allowed only in the debug build, for the local mock. A release build talking to a real backend must use HTTPS.
+- Android: `INTERNET` only (plus `<package>.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION`, a signature-level permission AndroidX declares for the app's own receivers; no user prompt). The picker is the system document UI (SAF, `ACTION_OPEN_DOCUMENT`) and needs no storage permission. `READ/WRITE_EXTERNAL_STORAGE` (declared by `expo-file-system`), `SYSTEM_ALERT_WINDOW` and `VIBRATE` are removed from the main manifest (`android.blockedPermissions`). The **debug** build additionally requests `SYSTEM_ALERT_WINDOW` (dev menu overlay) and `ACCESS_LOCAL_NETWORK` (Metro), both from React Native's debug-only manifests; they aren't in a release build. Cleartext HTTP is allowed only in the debug build, for the local mock. A release build talking to a real backend must use HTTPS.
 - iOS: no runtime permission. ATS keeps `NSAllowsArbitraryLoads=false` and `NSAllowsLocalNetworking=true` (local mock only). `NSLocalNetworkUsageDescription` is set for the physical-device LAN case; iOS prompts only when a LAN host is used.
 
 **Where file copies exist**

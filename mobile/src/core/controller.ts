@@ -39,6 +39,8 @@ export type Snapshot = {
   rejection: RejectReason | null;
   busy: Busy;
   loaded: boolean;
+  /** Time of the last successful manual status check (in memory only). */
+  checkedAt: number | null;
 };
 
 export type ControllerDeps = {
@@ -63,7 +65,7 @@ const errorFromHttp = (r: HttpResult<unknown>): ErrorCode => {
 };
 
 export class ImportController {
-  private snap: Snapshot = { op: null, draft: null, rejection: null, busy: null, loaded: false };
+  private snap: Snapshot = { op: null, draft: null, rejection: null, busy: null, loaded: false, checkedAt: null };
   private listeners = new Set<(s: Snapshot) => void>();
   private chain: Promise<unknown> = Promise.resolve();
   private pollTimer: ReturnType<typeof setTimeout> | null = null;
@@ -206,11 +208,17 @@ export class ImportController {
     const draft = this.snap.draft;
     if (!draft || this.snap.busy) return;
     if (this.snap.op && !this.canStartNew()) return;
-    const old = this.snap.op;
-    const op: ImportOp = { v: 1, importKey: this.deps.uuid(), file: draft.file, stagedUri: draft.stagedUri, send: 'pending' };
-    await this.update(() => op);
-    if (old?.stagedUri) this.deps.files.remove(old.stagedUri);
-    this.set({ draft: null });
+    // Busy is set synchronously so a second tap during the storage write can't create a second key.
+    this.set({ busy: 'sending' });
+    try {
+      const old = this.snap.op;
+      const op: ImportOp = { v: 1, importKey: this.deps.uuid(), file: draft.file, stagedUri: draft.stagedUri, send: 'pending' };
+      await this.update(() => op);
+      if (old?.stagedUri) this.deps.files.remove(old.stagedUri);
+      this.set({ draft: null, checkedAt: null });
+    } finally {
+      this.set({ busy: null });
+    }
     await this.send();
   }
 
@@ -232,7 +240,7 @@ export class ImportController {
     try {
       await this.updateFor(key, o => ({ ...o, send: 'sending', sendError: undefined }));
       log('post.start', { size: op.file.size, format: op.file.format });
-      const r = await this.deps.api.createImport(op.stagedUri, key, op.file.name);
+      const r = await this.deps.api.createImport(op.stagedUri, key, op.file.name ?? '');
       if (r.kind === 'ok') return await this.acked(key, r.data);
       const code = errorFromHttp(r);
       log('post.failed', { code, httpStatus: r.kind === 'http' ? r.status : undefined });
@@ -301,6 +309,8 @@ export class ImportController {
     this.set({ busy: 'refreshing' });
     try {
       await this.refresh();
+      // A check that returns the same revision changes nothing else on screen, so the time is the feedback.
+      this.set({ checkedAt: this.snap.op?.pollError ? null : Date.now() });
     } finally {
       this.set({ busy: null });
     }
@@ -354,12 +364,32 @@ export class ImportController {
   }
 
   // ---------- reset ----------
+  /** A new import is allowed only when nothing for the current key can exist on the server. */
   canStartNew() {
     const op = this.snap.op;
     if (!op) return true;
     if (op.send === 'failed') return true;
-    if (op.job?.status === 'deleted') return true;
-    return op.send === 'unknown' && op.sendError === 'not_found';
+    return op.job?.status === 'deleted';
+  }
+
+  /** True while the private copy needed for "Send again" is still on disk. */
+  hasStagedCopy() {
+    const uri = this.snap.op?.stagedUri;
+    return !!uri && this.deps.files.exists(uri);
+  }
+
+  /**
+   * Gives up on an upload whose outcome is unknown. By-key 404 means "not found yet", so the key is checked
+   * once more first: if the job turned up it is adopted instead of discarded.
+   */
+  async discardUnknown() {
+    const op = this.snap.op;
+    if (!op || op.send !== 'unknown' || this.snap.busy) return;
+    await this.checkByKey();
+    const now = this.snap.op;
+    if (now?.importKey === op.importKey && now.send === 'unknown' && now.sendError === 'not_found') {
+      await this.clearLocal(true);
+    }
   }
 
   /** Forget the local record (only when nothing is left on the server, or per diagnostics). */

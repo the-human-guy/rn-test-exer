@@ -48,8 +48,8 @@ export type ErrorCode =
   | 'unknown';
 
 export type FileMeta = {
-  /** Display name. Kept only in app-private storage; never logged. */
-  name: string;
+  /** Display name. Kept only in app-private storage, never logged, removed once the server confirms deletion. */
+  name?: string;
   size: number;
   format: FileFormat;
 };
