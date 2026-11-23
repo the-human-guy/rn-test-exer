@@ -3,7 +3,7 @@
 Source: `docs/mobile-engineer-test-task.pdf` (RU) + kit `README.md` + `mock-server.mjs` (read in full).
 Budget: ~8h of work within 4 calendar days. Base scenario > polish. If time runs out, ship the working part and list unverified platforms and the remaining risks.
 
-Legend: **[Q]** = open question for you (see the last section). **[V]** = verify during implementation, unknown now.
+Legend: **[V]** = verify during implementation, unknown now. Decisions: §11.
 
 ---
 
@@ -152,15 +152,25 @@ Each block is scored 0–4 (4 = all base scenarios + failure cases, tests, expla
 5. Relaunch/recovery, delete flow, edge tests (1h).
 6. Native verification, large-font/small-screen pass, README, release note, self-review (1h).
 
-## 11. Decisions
+## 11. Decisions (with rationale, for the video and the self-review)
 
-- Expo dev build. AsyncStorage (awaited writes). Kit moved to `/kit`, unchanged. Hardware: Mac with iOS simulator + Android emulator.
-
-## 12. Open questions
-
-1. Package manager: npm (the kit uses npm) / yarn / pnpm / bun? Default: npm.
-2. Navigation/state: react-navigation native stack + reducer/context (my pick) vs expo-router/zustand?
-3. One active import at a time is fine? (Simplification; the PDF doesn't require several.)
-4. CSV validation: require the exact `date,description,amount` header (same as the server's rule)? I recommend yes.
-5. Diagnostics screen: always visible, labelled "test-only" (my pick; the reviewer needs it), or `__DEV__` only?
-6. `.DS_Store` in the init commit: remove it? (Now in the root `.gitignore`.)
+| # | Decision | Why |
+|---|---|---|
+| D1 | **Expo development build** (CNG, `expo run:ios/android`), not bare RN or Expo Go | Explicitly allowed by the PDF. Native modules (picker, file system) without hand-maintained native projects. Expo Go is not accepted for grading. |
+| D2 | **AsyncStorage, every write awaited** before the next network step | "Key persisted before the first POST" is guaranteed by awaiting the native write. MMKV's sync writes aren't needed; one less native dependency. |
+| D3 | **Minimal, well-known deps only** (Expo SDK modules, AsyncStorage, react-navigation) | Supply-chain/privacy risk, reviewer trust. |
+| D4 | **Kit moved to `/kit`, contents byte-identical**; client in `/mobile`; root README is ours | The kit stays verifiably unmodified (diff against the zip); a clear entry point for the reviewer. |
+| D5 | **npm** | Same as the kit; no extra tooling for a clean checkout. |
+| D6 | **react-navigation native stack + plain reducer/context** | ~5 screens; expo-router/zustand add nothing here. The domain logic is a pure reducer → testable without RN. |
+| D7 | **One active import at a time** | Simplification for the deadline; the PDF doesn't require several. Named in the self-review. |
+| D8 | **Local validation by content**: size from metadata (no full read) ≤ 10 MiB; head bytes `%PDF-` or the exact `date,description,amount` CSV header; the detected format must match the declared type | No reliance on the extension/MIME (PDF requirement). Same rules as the server, so 415/413 never happen for a file we let through. Rejection before the POST keeps `createRequests` unchanged. |
+| D9 | **Idempotency key = UUID created at Confirm, persisted before the POST, reused for every retry**; separate persisted delete key | Exactly one job under lost_ack/relaunch (stop factor: a second job). |
+| D10 | **Unknown POST outcome → GET by-key; resend only on explicit user action** (same key + same bytes) | The PDF requires no spontaneous resend after relaunch; by-key 404 can mean "still in flight". |
+| D11 | **Monotonic revision gate + terminal phase guard** | stale_status can't roll the UI back; a late response can't resurrect a deleted job. |
+| D12 | **"Deleted" shown only after GET returns `status=deleted`**; 503 → "not confirmed, data still on server" + retry with the same key | Stop factor: a false deletion claim. |
+| D13 | **Private temp copy deleted as soon as the job is confirmed** (or on failure/cancel/delete) + a startup sweep of orphans | Minimal data at rest; the copy is kept only while a resend may be needed. |
+| D14 | **Logger with a field allowlist; no analytics/crash SDK** | No bytes, file names, or descriptions in logs. The file name leaves the device only in the required `X-File-Name` header. |
+| D15 | **Diagnostics screen always visible, labelled "test-only"** (scenario switch, reset, mock counters, base URL) | The reviewer needs it to run the matrix without code changes between runs. |
+| D16 | **Integration tests run against the real kit server** started in-process (`createMockServer`, temp state file) | Real HTTP, real counters (`newJobs`, `createRequests`), reproducible: a fresh state per test. |
+| D17 | **Native runs on the user's Mac** (iOS simulator + Android emulator); exact versions recorded at test time | The cloud container has no KVM/Xcode; a platform that isn't run is marked unverified. |
+| D18 | Removed the committed `.DS_Store`; root `.gitignore` covers it | Junk file, not part of the server/fixtures. |
