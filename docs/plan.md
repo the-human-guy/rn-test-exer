@@ -32,25 +32,26 @@ Legend: **[Q]** = open question for you (see the last section). **[V]** = verify
 
 Note: the server never returns `status: "error"`. "error" in the UI = client-side or transport failure (network, 409, 413, 415, 5xx, timeout).
 
-## 3. Proposed stack (pending [Q1–Q4])
+## 3. Stack (decided: Expo dev build, AsyncStorage)
 
 - Expo SDK (latest stable at the time, **[V]** version) + dev build via `expo prebuild` / `expo run:ios|android`. CNG, no committed `ios/`/`android/` folders unless needed.
 - Picker: `expo-document-picker`. Files: `expo-file-system` (new `File`/`Directory` API: size, partial read through a file handle). Upload streamed from disk natively (`File` as the fetch body or `uploadAsync` BINARY_CONTENT) **[V]**: must not load the whole file into JS memory.
-- Persisted operation state: `react-native-mmkv` (synchronous write → "persisted before POST" is a real guarantee). Alternative: AsyncStorage (async, still fine if awaited).
+- Persisted operation state: `@react-native-async-storage/async-storage`. Every write is **awaited** before the next network step (POST/DELETE). The promise resolves after the native write completes. Dependency rule: only Expo SDK modules + well-known community packages, minimal count.
 - Domain logic: a plain TS reducer/state machine + an API client. No XState or Redux; small scope.
 - Tests: Jest. Domain + API client integration tests run in a Node env against the **real kit server** started in-process via `createMockServer({statePath: tmp})`, an import with no edits to the kit. Component tests: React Native Testing Library. E2E (optional, if time allows): Maestro.
 
-## 4. Repo layout (pending [Q5])
+## 4. Repo layout (decided)
 
 ```
-/            kit, unchanged (mock-server.mjs, fixtures/, package.json, README.md …)
+/kit         kit, contents byte-identical (mock-server.mjs, fixtures/, package.json, README.md, .gitignore)
 /mobile      RN client (own package.json, tests)
+/README.md   ours: clean checkout, run, test, per-platform results
 /docs        plan.md, task PDF, release-note.md, self-review.md
 ```
 
 ## 5. Client architecture
 
-### 5.1 Persisted operation record (one active import, [Q6])
+### 5.1 Persisted operation record (one active import,)
 ```
 ImportOp {
   importKey: string            // UUID v4, created at "Confirm" and persisted BEFORE the first POST
@@ -69,7 +70,7 @@ ImportOp {
 1. **Pick** → system picker (PDF/CSV filter is a hint only).
 2. **Validate locally, before any POST** (no reliance on the extension or MIME):
    - Size from file metadata (picker size, then a stat of the copy). Reject > 10 MiB (10 × 1024 × 1024) **without reading the file**. [V] whether the picker copies before we can check size (iOS `asCopy`, Android `copyToCacheDirectory`). If it copies, the copy is deleted immediately on rejection.
-   - Read only the first N bytes (~64) through a file handle → detect the format: `%PDF-` → pdf; `date,description,amount` header → csv; otherwise reject ("not a valid PDF/CSV"). The detected format must match the declared type (extension/MIME), otherwise reject. [Q7]
+   - Read only the first N bytes (~64) through a file handle → detect the format: `%PDF-` → pdf; `date,description,amount` header → csv; otherwise reject ("not a valid PDF/CSV"). The detected format must match the declared type (extension/MIME), otherwise reject.
 3. **Confirm screen**: name, human-readable size, detected format. Cancel → delete the temp copy and clear the op.
 4. **Confirm** → generate `importKey`, persist the op (`prepared`) → `sending` → POST (streamed bytes, headers).
    - 202 → store jobId, `tracking`, **delete the local copy**.
@@ -91,7 +92,7 @@ ImportOp {
 
 ### 5.4 Base URL / diagnostics
 - Base URL from config (default `http://127.0.0.1:8787`), overridable in the Diagnostics screen for a physical-device LAN host, persisted.
-- Diagnostics screen: scenario switch (happy/lost_ack/stale_status/delete_failure), reset, live `GET /__test/state` counters (createRequests, newJobs, duplicateHits, deleteRequests), current op dump (no PII). Dev-only gating [Q8].
+- Diagnostics screen: scenario switch (happy/lost_ack/stale_status/delete_failure), reset, live `GET /__test/state` counters (createRequests, newJobs, duplicateHits, deleteRequests), current op dump (no PII). Dev-only gating.
 
 ### 5.5 UI requirements
 - States: empty (no import), validating, confirm, sending, unknown outcome, queued, processing, ready, error (with action), deleting, delete-failed, deleted.
@@ -113,7 +114,7 @@ Command: `cd mobile && npm test`, which runs `fixtures:oversize` first (pretest)
 
 The validator must run against fixture files in Node and on device → abstract file access behind an interface (`FileSource` with `size()`, `readHead(n)`), implemented with expo-file-system in the app and `fs` in tests.
 
-## 7. Native verification (pending [Q9])
+## 7. Native verification (Mac with iOS simulator + Android emulator; exact versions recorded by your on-device agent at test time)
 
 - iOS (simulator or device) and Android (emulator or device): at least file picking + one full import on **each**. Record OS/device versions.
 - Getting fixtures onto the device: iOS sim drag & drop into Files / `xcrun simctl addmedia`? [V]; Android `adb push fixtures/* /sdcard/Download/`.
@@ -151,15 +152,15 @@ Each block is scored 0–4 (4 = all base scenarios + failure cases, tests, expla
 5. Relaunch/recovery, delete flow, edge tests (1h).
 6. Native verification, large-font/small-screen pass, README, release note, self-review (1h).
 
-## 11. Open questions
+## 11. Decisions
 
-1. **Expo dev build vs bare RN CLI?** I recommend Expo dev build: less native boilerplate, explicitly allowed. Bare only if you want to show native skills.
-2. Persistence: **MMKV** (sync, needs native) vs AsyncStorage? I recommend MMKV.
-3. Package manager: npm (the kit uses npm) / yarn / pnpm / bun?
-4. Any preference on navigation (expo-router vs react-navigation) or state (zustand vs useReducer + context)? I'd go with react-navigation native stack + reducer/context; expo-router is overkill for ~5 screens.
-5. Layout: kit stays at root unchanged, client in `/mobile`, and our README is `mobile/README.md` plus a pointer? Editing the root README technically modifies the kit. Alternative: move the kit to `/kit` (contents byte-identical) and own the root README. Your call; I lean toward `/kit` + root README for reviewer clarity.
-6. One active import at a time is fine? (Simplification; the PDF doesn't require several.)
-7. CSV validation: require the exact `date,description,amount` header (same as the server's rule) or a looser "valid UTF-8 text, no NULs, has a CSV header" check? I recommend the exact header: it's the statement schema, and the server would 415 anything else anyway.
-8. Diagnostics screen: always visible (simplest for the reviewer) or `__DEV__` only? The reviewer needs it for scenarios → I suggest always on, clearly labelled "test-only".
-9. What hardware do you have: a Mac with Xcode? Android emulator or a real device? Exact OS versions?
-10. `.DS_Store` is committed in the init commit. Remove it and add it to `.gitignore`? (If it was in the original zip, removing it is still harmless; it's not server or fixture code.)
+- Expo dev build. AsyncStorage (awaited writes). Kit moved to `/kit`, unchanged. Hardware: Mac with iOS simulator + Android emulator.
+
+## 12. Open questions
+
+1. Package manager: npm (the kit uses npm) / yarn / pnpm / bun? Default: npm.
+2. Navigation/state: react-navigation native stack + reducer/context (my pick) vs expo-router/zustand?
+3. One active import at a time is fine? (Simplification; the PDF doesn't require several.)
+4. CSV validation: require the exact `date,description,amount` header (same as the server's rule)? I recommend yes.
+5. Diagnostics screen: always visible, labelled "test-only" (my pick; the reviewer needs it), or `__DEV__` only?
+6. `.DS_Store` in the init commit: remove it? (Now in the root `.gitignore`.)
