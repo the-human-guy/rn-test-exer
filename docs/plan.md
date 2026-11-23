@@ -161,7 +161,7 @@ Each block is scored 0–4 (4 = all base scenarios + failure cases, tests, expla
 | D3 | **Minimal, well-known deps only** (Expo SDK modules, AsyncStorage, react-navigation) | Supply-chain/privacy risk, reviewer trust. |
 | D4 | **Kit moved to `/kit`, contents byte-identical**; client in `/mobile`; root README is ours | The kit stays verifiably unmodified (diff against the zip); a clear entry point for the reviewer. |
 | D5 | **npm** | Same as the kit; no extra tooling for a clean checkout. |
-| D6 | **react-navigation native stack + plain reducer/context** | ~5 screens; expo-router/zustand add nothing here. The domain logic is a pure reducer → testable without RN. |
+| D6 | **No navigation library; the screen is derived from the persisted op state** (+ a tiny local route for Details/Diagnostics). The domain logic is a plain TS controller + a pure revision reducer. | *Changed from "react-navigation" during implementation:* relaunch lands on the right screen automatically, one dependency fewer (D3). Testable without RN. |
 | D7 | **One active import at a time** | Simplification for the deadline; the PDF doesn't require several. Named in the self-review. |
 | D8 | **Local validation by content**: size from metadata (no full read) ≤ 10 MiB; head bytes `%PDF-` or the exact `date,description,amount` CSV header; the detected format must match the declared type | No reliance on the extension/MIME (PDF requirement). Same rules as the server, so 415/413 never happen for a file we let through. Rejection before the POST keeps `createRequests` unchanged. |
 | D9 | **Idempotency key = UUID created at Confirm, persisted before the POST, reused for every retry**; separate persisted delete key | Exactly one job under lost_ack/relaunch (stop factor: a second job). |
@@ -173,4 +173,13 @@ Each block is scored 0–4 (4 = all base scenarios + failure cases, tests, expla
 | D15 | **Diagnostics screen always visible, labelled "test-only"** (scenario switch, reset, mock counters, base URL) | The reviewer needs it to run the matrix without code changes between runs. |
 | D16 | **Integration tests run against the real kit server** started in-process (`createMockServer`, temp state file) | Real HTTP, real counters (`newJobs`, `createRequests`), reproducible: a fresh state per test. |
 | D17 | **Native runs on the user's Mac** (iOS simulator + Android emulator); exact versions recorded at test time | The cloud container has no KVM/Xcode; a platform that isn't run is marked unverified. |
+| D19 | **Expo SDK 58** (RN 0.88). Picker: `expo-document-picker` with `copyToCacheDirectory:false` | Android: no copy before validation (temporary `content://` grant, size from `OpenableColumns.SIZE`). iOS: the system always hands over a sandbox copy (`asCopy`), which we delete. Verified in the module sources. |
+| D20 | **Native streamed upload** via `expo-file-system` `File.upload` (BINARY_CONTENT) | Bytes go disk → socket natively (URLSession `uploadTask(fromFile:)` / OkHttp stream); never loaded into JS. |
+| D21 | **Staging in `Caches/import-staging`** (not backed up) | Privacy over durability: if the OS purges it during "unknown", the resend needs a re-pick (by-key recovery still works). |
+| D22 | Only `INTERNET` permission on Android (template extras blocked); cleartext only in debug; iOS ATS local networking only | Least privilege; see the release note. |
 | D18 | Removed the committed `.DS_Store`; root `.gitignore` covers it | Junk file, not part of the server/fixtures. |
+
+## 13. Status
+
+- Done: client (`mobile/`), tests 22/22 against the real kit mock (`docs/test-results.txt`), typecheck, iOS/Android bundles, prebuild config check, README, release note, self-review draft.
+- Pending (needs your Mac): native runs on the iOS Simulator + Android emulator, filling the platform table in the README, the video, the final self-review AI section.

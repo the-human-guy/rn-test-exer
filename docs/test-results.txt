@@ -1,0 +1,10 @@
+
+> statement-import@1.0.0 test
+> jest --runInBand
+
+
+Test Suites: 3 passed, 3 total
+Tests:       22 passed, 22 total
+Snapshots:   0 total
+Time:        10.204 s, estimated 13 s
+Ran all test suites in 2 projects.
